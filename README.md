@@ -1,11 +1,5 @@
 # FractureLens — Pelvic CT Fracture Viewer & Report Generator
 
-**Status:** Draft v1
-**Author:** (you)
-**Base dataset:** PENGWIN CT (pelvic fracture segmentation) — https://pengwin.grand-challenge.org/
-
----
-
 ## 1. Overview
 
 FractureLens is a desktop application for browsing pelvic CT scans, inspecting
