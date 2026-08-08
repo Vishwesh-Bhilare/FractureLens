@@ -11,7 +11,7 @@ from fracturelens.core.io import CATEGORY_DISPLAY_NAMES, decode_label, get_case_
 from fracturelens.core.geometry import FragmentMesh
 from fracturelens.core.metrics import CaseReport
 from fracturelens.core.render2d import render_axial_slice_png
-from fracturelens.core.render3d import build_fractured_bones_figure
+from fracturelens.core.render3d import build_case_figure, build_color_key
 
 
 def _data_uri(png: bytes) -> str:
@@ -38,9 +38,9 @@ def build_report_context(case_report: CaseReport, root: Path, mesh_smooth_iterat
             slice_images.append({"bone_name": name, "z_index": z, "data_uri": _data_uri(render_axial_slice_png(image_vol, label_vol, z))})
     render3d_note = None
     render3d_html = None
-    if fractured_ids:
+    if case_report.total_fragment_count > 0:
         try:
-            fig = build_fractured_bones_figure(label_vol, spacing, fractured_ids, mesh_smooth_iterations, fragment_meshes)
+            fig = build_case_figure(label_vol, spacing, mesh_smooth_iterations, fragment_meshes)
             fig.update_layout(height=700)
             # include_plotlyjs=True inlines plotly.js for offline portability; use CDN only if report size becomes a problem.
             render3d_html = fig.to_html(
@@ -50,7 +50,7 @@ def build_report_context(case_report: CaseReport, root: Path, mesh_smooth_iterat
             )
         except Exception as exc:
             render3d_note = f"3D render skipped: {exc}"
-    return {"report": case_report, "by_bone": by_bone, "slice_images": slice_images, "render3d_html": render3d_html, "render3d_note": render3d_note, "dataset_name": "PENGWIN CT", "mesh_smooth_iterations": mesh_smooth_iterations}
+    return {"report": case_report, "by_bone": by_bone, "slice_images": slice_images, "render3d_html": render3d_html, "render3d_note": render3d_note, "color_key": build_color_key(), "dataset_name": "PENGWIN CT", "mesh_smooth_iterations": mesh_smooth_iterations}
 
 
 def write_html_report(case_report: CaseReport, root: Path, output_dir: Path, mesh_smooth_iterations: int = 6, fragment_meshes: dict[int, FragmentMesh] | None = None) -> Path:
