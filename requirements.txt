@@ -14,3 +14,4 @@ kaleido
 fastapi<0.120
 uvicorn[standard]
 pytest
+httpx

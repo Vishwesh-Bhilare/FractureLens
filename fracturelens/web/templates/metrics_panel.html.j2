@@ -25,9 +25,12 @@
 {% endfor %}
 
 <h3>3D render</h3>
+{% if color_key %}
+  <p class="color-key">{% for item in color_key %}<span><span class="swatch" style="background-color: {{ item.hex }}"></span>{{ item.name }}</span>{% endfor %}</p>
+{% endif %}
 {% if render3d_html %}
-  <p>Interactive combined render of fractured bones — drag to rotate, scroll to zoom.</p>
+  <p>Interactive combined render of all labeled bone fragments — drag to rotate, scroll to zoom.</p>
   {{ render3d_html|safe }}
 {% else %}
-  <p class="note">No fractures — all bones intact.</p>
+  <p class="note">No labeled bone fragments found for this case.</p>
 {% endif %}

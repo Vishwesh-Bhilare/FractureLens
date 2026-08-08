@@ -14,7 +14,7 @@ from jinja2 import Environment, FileSystemLoader
 from fracturelens.core.io import CATEGORY_DISPLAY_NAMES, DEFAULT_ROOT, get_case_paths, list_available_case_ids, load_volume
 from fracturelens.core.metrics import QuickCaseSummary, quick_case_summary
 from fracturelens.core.render2d import render_slice_png
-from fracturelens.core.render3d import build_fractured_bones_figure
+from fracturelens.core.render3d import build_case_figure, build_color_key
 from fracturelens.core.report_cache import CACHE_ROOT, get_report
 from fracturelens.report.builder import write_html_report
 
@@ -105,11 +105,10 @@ def metrics_panel(case_id: str, request: Request, no_cache: bool = False) -> HTM
     try:
         case_report, fragment_meshes = get_report(case_id, root, mesh_smooth, no_cache, include_meshes=True)
         render3d_html = None
-        if case_report.fractured_bones:
+        if case_report.total_fragment_count > 0:
             _, label_path = get_case_paths(root, case_id)
             label_vol, spacing = _load_volume_cached(str(label_path))
-            fractured_ids = [cid for cid, name in CATEGORY_DISPLAY_NAMES.items() if name in case_report.fractured_bones]
-            fig = build_fractured_bones_figure(label_vol, spacing, fractured_ids, mesh_smooth, fragment_meshes)
+            fig = build_case_figure(label_vol, spacing, mesh_smooth, fragment_meshes)
             fig.update_layout(height=700)
             # Inline plotly.js deliberately for offline local reports/panels; CDN would be smaller but network-dependent.
             render3d_html = fig.to_html(full_html=False, include_plotlyjs=True, div_id=f"fracture-3d-render-{case_id}")
@@ -119,6 +118,7 @@ def metrics_panel(case_id: str, request: Request, no_cache: bool = False) -> HTM
             categories=CATEGORY_DISPLAY_NAMES,
             render3d_html=render3d_html,
             mesh_smooth_iterations=mesh_smooth,
+            color_key=build_color_key(),
         ))
     except Exception as exc:
         return HTMLResponse(f'<div class="error"><strong>Unable to compute metrics:</strong> {html.escape(str(exc))}</div>')
