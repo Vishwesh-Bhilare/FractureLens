@@ -1,0 +1,29 @@
+{% extends "base.html.j2" %}
+{% block title %}FractureLens Cases{% endblock %}
+{% block content %}
+<section class="card">
+  <h1>Cases</h1>
+  <p class="muted">Data root: <code>{{ root }}</code></p>
+  <table>
+    <thead><tr><th>Case ID</th><th>Fractured bones</th><th>Total fragments</th><th></th></tr></thead>
+    <tbody>
+    {% for case in cases %}
+      <tr>
+        <td><strong>{{ case.case_id }}</strong></td>
+        <td>
+          {% if case.fractured_bones %}
+            {% for bone in case.fractured_bones %}<span class="badge fractured">{{ bone }}</span>{% endfor %}
+          {% else %}
+            <span class="badge intact">— intact —</span>
+          {% endif %}
+        </td>
+        <td>{{ case.total_fragment_count }}</td>
+        <td><a class="button" href="/case/{{ case.case_id }}">Open</a></td>
+      </tr>
+    {% else %}
+      <tr><td colspan="4">No cases found under <code>{{ root }}</code>.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

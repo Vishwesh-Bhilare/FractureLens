@@ -1,0 +1,33 @@
+<div class="summary">
+  <p><strong>Computed:</strong> {{ report.computed_at }}</p>
+  <p><strong>Total fragment count:</strong> {{ report.total_fragment_count }}</p>
+  <p><strong>Fractured bones:</strong> {{ report.fractured_bones|join(', ') if report.fractured_bones else 'None' }}</p>
+  <p><strong>Intact bones:</strong> {{ report.intact_bones|join(', ') if report.intact_bones else 'None' }}</p>
+  <p><strong>Missing bones:</strong> {{ report.missing_bones|join(', ') if report.missing_bones else 'None' }}</p>
+  <p><strong>Illustrative severity score, not a clinical measure:</strong> {{ '%.3f'|format(report.severity_score) }}</p>
+</div>
+
+<h3>Per-bone breakdown</h3>
+{% for cid, name in categories.items() %}
+  {% set fragments = report.fragments|selectattr('category_id', 'equalto', cid)|list %}
+  <h4>{{ name }}</h4>
+  <p>Fragment count: {{ fragments|length }}</p>
+  <table>
+    <thead><tr><th>Fragment ID</th><th>Volume (mm³)</th><th>Surface Area (mm²)</th><th>Nearest Neighbor Distance (mm)</th></tr></thead>
+    <tbody>
+    {% for f in fragments %}
+      <tr><td>{{ f.fragment_id }}</td><td>{{ '%.3f'|format(f.volume_mm3) }}</td><td>{{ '%.3f'|format(f.surface_area_mm2) if f.surface_area_mm2 is not none else '—' }}</td><td>{{ '%.3f'|format(f.nearest_neighbor_dist_mm) if f.nearest_neighbor_dist_mm is not none else '—' }}</td></tr>
+    {% else %}
+      <tr><td colspan="4">No labeled voxels found.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+{% endfor %}
+
+<h3>3D render</h3>
+{% if render3d_html %}
+  <p>Interactive combined render of fractured bones — drag to rotate, scroll to zoom.</p>
+  {{ render3d_html|safe }}
+{% else %}
+  <p class="note">No fractures — all bones intact.</p>
+{% endif %}

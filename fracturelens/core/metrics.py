@@ -42,6 +42,16 @@ class CaseReport:
     computed_at: str
 
 
+@dataclass
+class QuickCaseSummary:
+    """Lightweight case-level summary that avoids mesh construction."""
+    case_id: str
+    fractured_bones: list[str]
+    intact_bones: list[str]
+    missing_bones: list[str]
+    total_fragment_count: int
+
+
 def case_report_to_dict(report: CaseReport, mesh_smooth_iterations: int | None = None) -> dict[str, Any]:
     """Serialize a ``CaseReport`` to a JSON-compatible dictionary."""
     data = asdict(report)
@@ -86,6 +96,29 @@ def compute_case_report(case_id: str, root: Path, mesh_smooth_iterations: int = 
     """Load one label volume, compute fragment metrics, and aggregate a case report."""
     report, _ = compute_case_report_with_meshes(case_id, root, mesh_smooth_iterations)
     return report
+
+
+def _aggregate_bone_status(labels_by_cat: dict[int, list[int]]) -> tuple[list[str], list[str], list[str]]:
+    """Classify bones from per-category fragment counts."""
+    counts = {cid: len(labels_by_cat.get(cid, [])) for cid in CATEGORY_DISPLAY_NAMES}
+    fractured = [CATEGORY_DISPLAY_NAMES[cid] for cid, count in counts.items() if count > 1]
+    intact = [CATEGORY_DISPLAY_NAMES[cid] for cid, count in counts.items() if count == 1]
+    missing = [CATEGORY_DISPLAY_NAMES[cid] for cid, count in counts.items() if count == 0]
+    return fractured, intact, missing
+
+
+def quick_case_summary(case_id: str, root: Path) -> QuickCaseSummary:
+    """Load only labels and summarize bone status without building meshes."""
+    _, label_path = get_case_paths(root, case_id)
+    label_vol, _ = load_volume(label_path)
+    unique_labels = sorted(int(v) for v in np.unique(label_vol) if int(v) != 0)
+    labels_by_cat: dict[int, list[int]] = {cid: [] for cid in CATEGORY_DISPLAY_NAMES}
+    for label in unique_labels:
+        cid, _ = decode_label(label)
+        labels_by_cat.setdefault(cid, []).append(label)
+    fractured, intact, missing = _aggregate_bone_status(labels_by_cat)
+    total = sum(len(v) for v in labels_by_cat.values())
+    return QuickCaseSummary(case_id, fractured, intact, missing, total)
 
 
 def compute_case_report_with_meshes(case_id: str, root: Path, mesh_smooth_iterations: int = 6) -> tuple[CaseReport, dict[int, FragmentMesh]]:
@@ -142,9 +175,7 @@ def compute_case_report_with_meshes(case_id: str, root: Path, mesh_smooth_iterat
                 nearest_neighbor_dist_mm=nearest_dist, nearest_neighbor_label=nearest_label,
             ))
     counts = {cid: len(labels_by_cat.get(cid, [])) for cid in CATEGORY_DISPLAY_NAMES}
-    fractured = [CATEGORY_DISPLAY_NAMES[cid] for cid, count in counts.items() if count > 1]
-    intact = [CATEGORY_DISPLAY_NAMES[cid] for cid, count in counts.items() if count == 1]
-    missing = [CATEGORY_DISPLAY_NAMES[cid] for cid, count in counts.items() if count == 0]
+    fractured, intact, missing = _aggregate_bone_status(labels_by_cat)
     excess = sum(max(0, count - 1) for count in counts.values() if count >= 1)
     fractured_fragments = [f for f in fragments if f.nearest_neighbor_dist_mm is not None]
     avg_gap = mean(f.nearest_neighbor_dist_mm for f in fractured_fragments) if fractured_fragments else 0.0

@@ -9,5 +9,8 @@ trimesh
 matplotlib
 plotly
 jinja2
+# Optional: only needed for scripts/view_pengwin_3d*.py --png export, not report generation.
 kaleido
+fastapi<0.120
+uvicorn[standard]
 pytest
