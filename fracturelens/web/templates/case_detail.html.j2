@@ -41,18 +41,35 @@ const slider = document.getElementById('slice-slider');
 const sliceValue = document.getElementById('slice-value');
 const sliceImage = document.getElementById('slice-image');
 const panel = document.getElementById('metrics-panel');
+let sliceDebounceTimer = null;
 function updateSlice(resetIndex) {
   const axis = axisSelect.value;
   slider.max = maxIndices[axis];
   if (resetIndex) slider.value = middleIndices[axis];
   sliceValue.textContent = slider.value;
-  sliceImage.src = `/case/${caseId}/slice?axis=${axis}&index=${slider.value}`;
+  clearTimeout(sliceDebounceTimer);
+  sliceDebounceTimer = setTimeout(() => {
+    sliceImage.src = `/case/${caseId}/slice?axis=${axis}&index=${slider.value}`;
+  }, 120);
 }
 function loadPanel(noCache=false) {
   panel.innerHTML = '<div class="spinner" aria-label="Loading"></div><p>Computing metrics and 3D render…</p>';
   fetch(`/case/${caseId}/metrics-panel${noCache ? '?no_cache=true' : ''}`)
     .then(r => r.text())
-    .then(html => { panel.innerHTML = html; });
+    .then(html => {
+      panel.innerHTML = html;
+      // innerHTML does not execute <script> tags -- re-create and re-insert
+      // each one so the embedded Plotly render script actually runs.
+      panel.querySelectorAll('script').forEach(oldScript => {
+        const newScript = document.createElement('script');
+        if (oldScript.src) {
+          newScript.src = oldScript.src;
+        } else {
+          newScript.textContent = oldScript.textContent;
+        }
+        oldScript.replaceWith(newScript);
+      });
+    });
 }
 axisSelect.addEventListener('change', () => updateSlice(true));
 slider.addEventListener('input', () => updateSlice(false));
