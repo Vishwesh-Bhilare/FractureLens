@@ -2,3 +2,12 @@ numpy
 seaborn
 opencv-python
 albumentations[imgaug]
+SimpleITK
+scikit-image
+scipy
+trimesh
+matplotlib
+plotly
+jinja2
+kaleido
+pytest
