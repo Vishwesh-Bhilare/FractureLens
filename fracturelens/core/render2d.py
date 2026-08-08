@@ -33,12 +33,33 @@ def make_label_cmap(max_label: int) -> ListedColormap:
     return ListedColormap(colors)
 
 
-def render_axial_slice_png(image_vol: np.ndarray, label_vol: np.ndarray, z_index: int) -> bytes:
-    """Render one axial CT slice with label overlay to PNG bytes."""
+def _slice_for_axis(vol: np.ndarray, axis: int, index: int) -> np.ndarray:
+    if axis == 0:
+        return vol[index]
+    if axis == 1:
+        return vol[:, index, :]
+    if axis == 2:
+        return vol[:, :, index]
+    raise ValueError("axis must be 0 (axial), 1 (coronal), or 2 (sagittal)")
+
+
+def render_slice_png(image_vol: np.ndarray, label_vol: np.ndarray, axis: int, index: int) -> bytes:
+    """Render one CT slice with label overlay to PNG bytes.
+
+    axis: 0=axial(z), 1=coronal(y), 2=sagittal(x).
+    """
+    image_slice = _slice_for_axis(image_vol, axis, index)
+    label_slice = _slice_for_axis(label_vol, axis, index)
+    axis_names = {0: "Axial z", 1: "Coronal y", 2: "Sagittal x"}
     fig, ax = plt.subplots(figsize=(6, 6), dpi=140)
-    ax.imshow(window_ct(image_vol[z_index]), cmap="gray", vmin=0, vmax=1, interpolation="bilinear")
-    ax.imshow(label_vol[z_index], cmap=make_label_cmap(int(label_vol.max())), vmin=0, vmax=max(1, int(label_vol.max())), interpolation="nearest")
-    ax.set_title(f"Axial slice z={z_index}")
+    ax.imshow(window_ct(image_slice), cmap="gray", vmin=0, vmax=1, interpolation="bilinear")
+    ax.imshow(label_slice, cmap=make_label_cmap(int(label_vol.max())), vmin=0, vmax=max(1, int(label_vol.max())), interpolation="nearest")
+    ax.set_title(f"{axis_names[axis]}={index}")
     ax.axis("off")
     buf = BytesIO(); fig.savefig(buf, format="png", bbox_inches="tight"); plt.close(fig)
     return buf.getvalue()
+
+
+def render_axial_slice_png(image_vol: np.ndarray, label_vol: np.ndarray, z_index: int) -> bytes:
+    """Render one axial CT slice with label overlay to PNG bytes."""
+    return render_slice_png(image_vol, label_vol, axis=0, index=z_index)

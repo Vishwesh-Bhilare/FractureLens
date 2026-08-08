@@ -1,0 +1,62 @@
+{% extends "base.html.j2" %}
+{% block title %}Case {{ case_id }}{% endblock %}
+{% block content %}
+<section class="card">
+  <p><a href="/">← All cases</a></p>
+  <h1>Case {{ case_id }}</h1>
+  <div class="actions">
+    <a class="button" href="/case/{{ case_id }}/report">Download Report</a>
+    <button id="refresh-metrics" type="button">Refresh (recompute)</button>
+  </div>
+</section>
+
+<section class="card">
+  <h2>Slice viewer</h2>
+  <div class="controls">
+    <label>Orientation
+      <select id="axis-select">
+        <option value="0">Axial</option>
+        <option value="1">Coronal</option>
+        <option value="2">Sagittal</option>
+      </select>
+    </label>
+    <label>Slice <span id="slice-value">{{ middle_indices[0] }}</span>
+      <input id="slice-slider" type="range" min="0" max="{{ max_indices[0] }}" value="{{ middle_indices[0] }}">
+    </label>
+  </div>
+  <img id="slice-image" class="slice" src="/case/{{ case_id }}/slice?axis=0&amp;index={{ middle_indices[0] }}" alt="Case {{ case_id }} CT slice with label overlay">
+</section>
+
+<section class="card">
+  <h2>Metrics &amp; 3D Render</h2>
+  <div id="metrics-panel"><div class="spinner" aria-label="Loading"></div><p>Computing metrics and 3D render…</p></div>
+</section>
+
+<script>
+const caseId = {{ case_id|tojson }};
+const maxIndices = {{ max_indices|tojson }};
+const middleIndices = {{ middle_indices|tojson }};
+const axisSelect = document.getElementById('axis-select');
+const slider = document.getElementById('slice-slider');
+const sliceValue = document.getElementById('slice-value');
+const sliceImage = document.getElementById('slice-image');
+const panel = document.getElementById('metrics-panel');
+function updateSlice(resetIndex) {
+  const axis = axisSelect.value;
+  slider.max = maxIndices[axis];
+  if (resetIndex) slider.value = middleIndices[axis];
+  sliceValue.textContent = slider.value;
+  sliceImage.src = `/case/${caseId}/slice?axis=${axis}&index=${slider.value}`;
+}
+function loadPanel(noCache=false) {
+  panel.innerHTML = '<div class="spinner" aria-label="Loading"></div><p>Computing metrics and 3D render…</p>';
+  fetch(`/case/${caseId}/metrics-panel${noCache ? '?no_cache=true' : ''}`)
+    .then(r => r.text())
+    .then(html => { panel.innerHTML = html; });
+}
+axisSelect.addEventListener('change', () => updateSlice(true));
+slider.addEventListener('input', () => updateSlice(false));
+document.getElementById('refresh-metrics').addEventListener('click', () => loadPanel(true));
+loadPanel(false);
+</script>
+{% endblock %}
