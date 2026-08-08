@@ -3,7 +3,7 @@
 import numpy as np
 import plotly.graph_objects as go
 
-from fracturelens.core.geometry import build_fragment_mesh, fracture_proximity_intensity, fragment_bounding_box
+from fracturelens.core.geometry import MIN_VOXELS_FOR_MESH, FragmentMesh, build_fragment_mesh, fracture_proximity_intensity, fragment_bounding_box
 from fracturelens.core.io import CATEGORY_DISPLAY_NAMES, decode_label
 
 CATEGORY_BASE_COLOR = {1: (200, 50, 50), 2: (50, 110, 210), 3: (50, 170, 75)}
@@ -16,7 +16,7 @@ def make_colorscale(base_rgb: tuple[int, int, int]) -> list[list[float | str]]:
     return [[0.0, f"rgb({hi[0]},{hi[1]},{hi[2]})"], [1.0, f"rgb({base_rgb[0]},{base_rgb[1]},{base_rgb[2]})"]]
 
 
-def build_fractured_bones_figure(label_vol: np.ndarray, spacing_xyz: tuple[float, float, float], fractured_category_ids: list[int], mesh_smooth_iterations: int = 6) -> go.Figure:
+def build_fractured_bones_figure(label_vol: np.ndarray, spacing_xyz: tuple[float, float, float], fractured_category_ids: list[int], mesh_smooth_iterations: int = 6, fragment_meshes: dict[int, FragmentMesh] | None = None) -> go.Figure:
     """Build a static Plotly figure for fractured bones only."""
     vz, vy, vx = spacing_xyz[2], spacing_xyz[1], spacing_xyz[0]
     voxel_spacing = (vz, vy, vx); voxel_volume = vz * vy * vx
@@ -28,9 +28,11 @@ def build_fractured_bones_figure(label_vol: np.ndarray, spacing_xyz: tuple[float
         bbox = fragment_bounding_box(np.isin(label_vol, labels)); crop = label_vol[bbox]
         for label in labels:
             mask = crop == label
-            if int(mask.sum()) < 20:
+            if int(mask.sum()) < MIN_VOXELS_FOR_MESH:
                 continue
-            mesh = build_fragment_mesh(mask, voxel_volume, mesh_smooth_iterations)
+            mesh = fragment_meshes.get(label) if fragment_meshes is not None else None
+            if mesh is None:
+                mesh = build_fragment_mesh(mask, voxel_volume, mesh_smooth_iterations)
             intensity = fracture_proximity_intensity(mesh.verts, crop, label, labels, voxel_spacing)
             verts = mesh.verts.copy()
             verts[:, 0] = (mesh.verts[:, 0] + bbox[0].start) * vz
