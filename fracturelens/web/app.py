@@ -2,13 +2,14 @@
 
 import html
 import json
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
-from jinja2 import Environment, FileSystemLoader, select_autoescape
+from jinja2 import Environment, FileSystemLoader
 
 from fracturelens.core.io import CATEGORY_DISPLAY_NAMES, DEFAULT_ROOT, get_case_paths, list_available_case_ids, load_volume
 from fracturelens.core.metrics import QuickCaseSummary, quick_case_summary
@@ -23,7 +24,12 @@ DEFAULT_OUTPUT_DIR = Path(__file__).resolve().parent.parent.parent / "outputs"
 app = FastAPI(title="FractureLens")
 app.mount("/static", StaticFiles(directory=WEB_ROOT / "static"), name="static")
 
-templates = Environment(loader=FileSystemLoader(WEB_ROOT / "templates"), autoescape=select_autoescape())
+templates = Environment(loader=FileSystemLoader(WEB_ROOT / "templates"), autoescape=True)
+
+
+@lru_cache(maxsize=8)
+def _load_volume_cached(path_str: str):
+    return load_volume(Path(path_str))
 
 
 def _root(request: Request) -> Path:
@@ -58,7 +64,7 @@ def _summary_from_cache_or_labels(case_id: str, root: Path) -> QuickCaseSummary:
 
 def _shape_context(root: Path, case_id: str) -> dict[str, Any]:
     _, label_path = get_case_paths(root, case_id)
-    label_vol, _ = load_volume(label_path)
+    label_vol, _ = _load_volume_cached(str(label_path))
     shape = tuple(int(v) for v in label_vol.shape)
     max_indices = {0: shape[0] - 1, 1: shape[1] - 1, 2: shape[2] - 1}
     middle_indices = {axis: max_index // 2 for axis, max_index in max_indices.items()}
@@ -85,8 +91,8 @@ def case_slice(case_id: str, request: Request, axis: int = 0, index: int = 0) ->
         raise HTTPException(status_code=400, detail="axis must be 0 (axial), 1 (coronal), or 2 (sagittal)")
     root = _root(request)
     image_path, label_path = get_case_paths(root, case_id)
-    image_vol, _ = load_volume(image_path)
-    label_vol, _ = load_volume(label_path)
+    image_vol, _ = _load_volume_cached(str(image_path))
+    label_vol, _ = _load_volume_cached(str(label_path))
     if index < 0 or index >= label_vol.shape[axis]:
         raise HTTPException(status_code=400, detail=f"index must be between 0 and {label_vol.shape[axis] - 1} for axis {axis}")
     return Response(content=render_slice_png(image_vol, label_vol, axis, index), media_type="image/png")
@@ -101,7 +107,7 @@ def metrics_panel(case_id: str, request: Request, no_cache: bool = False) -> HTM
         render3d_html = None
         if case_report.fractured_bones:
             _, label_path = get_case_paths(root, case_id)
-            label_vol, spacing = load_volume(label_path)
+            label_vol, spacing = _load_volume_cached(str(label_path))
             fractured_ids = [cid for cid, name in CATEGORY_DISPLAY_NAMES.items() if name in case_report.fractured_bones]
             fig = build_fractured_bones_figure(label_vol, spacing, fractured_ids, mesh_smooth, fragment_meshes)
             fig.update_layout(height=700)

@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-from jinja2 import Environment, FileSystemLoader, select_autoescape
+from jinja2 import Environment, FileSystemLoader
 
 from fracturelens.core.io import CATEGORY_DISPLAY_NAMES, decode_label, get_case_paths, load_volume
 from fracturelens.core.geometry import FragmentMesh
@@ -55,7 +55,7 @@ def build_report_context(case_report: CaseReport, root: Path, mesh_smooth_iterat
 
 def write_html_report(case_report: CaseReport, root: Path, output_dir: Path, mesh_smooth_iterations: int = 6, fragment_meshes: dict[int, FragmentMesh] | None = None) -> Path:
     """Render and write the self-contained case HTML report."""
-    env = Environment(loader=FileSystemLoader(Path(__file__).parent / "templates"), autoescape=select_autoescape())
+    env = Environment(loader=FileSystemLoader(Path(__file__).parent / "templates"), autoescape=True)
     html = env.get_template("case_report.html.j2").render(**build_report_context(case_report, root, mesh_smooth_iterations, fragment_meshes))
     output_dir.mkdir(parents=True, exist_ok=True)
     out = output_dir / f"{case_report.case_id}_report.html"
