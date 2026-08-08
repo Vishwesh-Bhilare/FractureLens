@@ -9,7 +9,7 @@ from typing import Any
 import numpy as np
 from scipy.ndimage import distance_transform_edt
 
-from fracturelens.core.geometry import build_fragment_mesh, fragment_bounding_box
+from fracturelens.core.geometry import MIN_VOXELS_FOR_MESH, FragmentMesh, build_fragment_mesh, fragment_bounding_box
 from fracturelens.core.io import CATEGORY_DISPLAY_NAMES, decode_label, get_case_paths, load_volume
 
 
@@ -61,11 +61,7 @@ def case_report_from_dict(data: dict[str, Any]) -> CaseReport:
     )
 
 
-def _surface_area_mm2(mask: np.ndarray, voxel_volume_mm3: float, voxel_spacing: tuple[float, float, float], iterations: int) -> float | None:
-    try:
-        mesh = build_fragment_mesh(mask, voxel_volume_mm3, iterations)
-    except (RuntimeError, ValueError):
-        return None
+def _mesh_surface_area_mm2(mesh: FragmentMesh, voxel_spacing: tuple[float, float, float]) -> float | None:
     try:
         import trimesh
         # Mesh vertices are (z,y,x) voxel indices. Scale each axis before area because
@@ -76,8 +72,24 @@ def _surface_area_mm2(mask: np.ndarray, voxel_volume_mm3: float, voxel_spacing: 
         return None
 
 
+def _surface_area_mm2(mask: np.ndarray, voxel_volume_mm3: float, voxel_spacing: tuple[float, float, float], iterations: int) -> float | None:
+    if int(mask.sum()) < MIN_VOXELS_FOR_MESH:
+        return None
+    try:
+        mesh = build_fragment_mesh(mask, voxel_volume_mm3, iterations)
+    except (RuntimeError, ValueError):
+        return None
+    return _mesh_surface_area_mm2(mesh, voxel_spacing)
+
+
 def compute_case_report(case_id: str, root: Path, mesh_smooth_iterations: int = 6) -> CaseReport:
     """Load one label volume, compute fragment metrics, and aggregate a case report."""
+    report, _ = compute_case_report_with_meshes(case_id, root, mesh_smooth_iterations)
+    return report
+
+
+def compute_case_report_with_meshes(case_id: str, root: Path, mesh_smooth_iterations: int = 6) -> tuple[CaseReport, dict[int, FragmentMesh]]:
+    """Compute fragment metrics and return reusable meshes keyed by label."""
     _, label_path = get_case_paths(root, case_id)
     label_vol, spacing_xyz = load_volume(label_path)
     voxel_spacing = (spacing_xyz[2], spacing_xyz[1], spacing_xyz[0])
@@ -89,6 +101,7 @@ def compute_case_report(case_id: str, root: Path, mesh_smooth_iterations: int = 
         labels_by_cat.setdefault(cid, []).append(label)
 
     fragments: list[FragmentMetrics] = []
+    fragment_meshes: dict[int, FragmentMesh] = {}
     for cid in sorted(CATEGORY_DISPLAY_NAMES):
         frag_labels = labels_by_cat.get(cid, [])
         if not frag_labels:
@@ -104,23 +117,26 @@ def compute_case_report(case_id: str, root: Path, mesh_smooth_iterations: int = 
             nearest_dist = None; nearest_label = None
             if len(frag_labels) > 1:
                 other = (crop != label) & (crop != 0) & np.isin(crop, frag_labels)
-                dist_mm = distance_transform_edt(~other, sampling=voxel_spacing)
+                dist_mm, nearest_idx = distance_transform_edt(~other, sampling=voxel_spacing, return_indices=True)
                 nearest_dist = float(dist_mm[mask_crop].min())
-                best = None
-                for sibling in frag_labels:
-                    if sibling == label:
-                        continue
-                    d = distance_transform_edt(crop != sibling, sampling=voxel_spacing)
-                    val = float(d[mask_crop].min())
-                    if best is None or val < best[0]:
-                        best = (val, sibling)
-                nearest_label = int(best[1]) if best else None
+                flat_pos = int(np.argmin(dist_mm[mask_crop]))
+                own_coords = np.argwhere(mask_crop)[flat_pos]
+                nearest_voxel_coords = nearest_idx[:, own_coords[0], own_coords[1], own_coords[2]]
+                nearest_label = int(crop[tuple(nearest_voxel_coords)])
             voxel_count = int(mask_full.sum())
+            surface_area = None
+            if voxel_count >= MIN_VOXELS_FOR_MESH:
+                try:
+                    mesh = build_fragment_mesh(mask_crop, voxel_volume_mm3, mesh_smooth_iterations)
+                    fragment_meshes[label] = mesh
+                    surface_area = _mesh_surface_area_mm2(mesh, voxel_spacing)
+                except (RuntimeError, ValueError):
+                    surface_area = None
             _, frag_id = decode_label(label)
             fragments.append(FragmentMetrics(
                 label=label, category_id=cid, category_name=CATEGORY_DISPLAY_NAMES.get(cid, f"Unknown ({cid})"),
                 fragment_id=frag_id, voxel_count=voxel_count, volume_mm3=float(voxel_count * voxel_volume_mm3),
-                surface_area_mm2=_surface_area_mm2(mask_crop, voxel_volume_mm3, voxel_spacing, mesh_smooth_iterations),
+                surface_area_mm2=surface_area,
                 centroid_mm=(float(centroid_zyx[2] * spacing_xyz[0]), float(centroid_zyx[1] * spacing_xyz[1]), float(centroid_zyx[0] * spacing_xyz[2])),
                 bbox_mm=(float(mins[2]*spacing_xyz[0]), float(mins[1]*spacing_xyz[1]), float(mins[0]*spacing_xyz[2]), float(maxs[2]*spacing_xyz[0]), float(maxs[1]*spacing_xyz[1]), float(maxs[0]*spacing_xyz[2])),
                 nearest_neighbor_dist_mm=nearest_dist, nearest_neighbor_label=nearest_label,
@@ -134,4 +150,5 @@ def compute_case_report(case_id: str, root: Path, mesh_smooth_iterations: int = 
     avg_gap = mean(f.nearest_neighbor_dist_mm for f in fractured_fragments) if fractured_fragments else 0.0
     # v1 illustrative formula, not a clinical severity measure -- see PROJECT_SCOPE.md §10.
     severity = excess * 10.0 + avg_gap
-    return CaseReport(case_id, fragments, fractured, intact, missing, len(fragments), float(severity), datetime.now(timezone.utc).isoformat())
+    report = CaseReport(case_id, fragments, fractured, intact, missing, len(fragments), float(severity), datetime.now(timezone.utc).isoformat())
+    return report, fragment_meshes

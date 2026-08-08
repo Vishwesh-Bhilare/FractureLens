@@ -6,6 +6,8 @@ import numpy as np
 from scipy.ndimage import distance_transform_edt, find_objects
 from skimage.measure import marching_cubes
 
+MIN_VOXELS_FOR_MESH = 20
+
 try:
     import trimesh
     import trimesh.smoothing
