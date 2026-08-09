@@ -26,6 +26,7 @@ class FragmentMesh:
     raw_mesh_volume_mm3: float
     smoothed_mesh_volume_mm3: float
     smoothing_applied: bool
+    origin_zyx: tuple[float, float, float] = (0.0, 0.0, 0.0)
 
 
 def build_fragment_mesh(frag_mask: np.ndarray, voxel_volume_mm3: float, taubin_iterations: int = 6) -> FragmentMesh:

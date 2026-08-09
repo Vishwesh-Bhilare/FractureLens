@@ -2,7 +2,7 @@
 
 import html
 import json
-from functools import lru_cache
+from collections import OrderedDict
 from pathlib import Path
 from typing import Any
 
@@ -11,12 +11,13 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from jinja2 import Environment, FileSystemLoader
 
-from fracturelens.core.io import CATEGORY_DISPLAY_NAMES, DEFAULT_ROOT, get_case_paths, list_available_case_ids, load_volume
+from fracturelens.core.io import CATEGORIES, CATEGORY_DISPLAY_NAMES, DEFAULT_ROOT, get_case_paths, list_available_case_ids, load_volume
 from fracturelens.core.metrics import QuickCaseSummary, quick_case_summary
 from fracturelens.core.render2d import render_slice_png
 from fracturelens.core.render3d import build_case_figure, build_color_key
 from fracturelens.core.report_cache import CACHE_ROOT, get_report
 from fracturelens.report.builder import write_html_report
+from fracturelens.core.stl_export import export_bone_stl, export_fragment_stl
 
 WEB_ROOT = Path(__file__).parent
 DEFAULT_OUTPUT_DIR = Path(__file__).resolve().parent.parent.parent / "outputs"
@@ -27,9 +28,27 @@ app.mount("/static", StaticFiles(directory=WEB_ROOT / "static"), name="static")
 templates = Environment(loader=FileSystemLoader(WEB_ROOT / "templates"), autoescape=True)
 
 
-@lru_cache(maxsize=8)
-def _load_volume_cached(path_str: str):
-    return load_volume(Path(path_str))
+class _VolumeCache:
+    def __init__(self, maxsize: int = 8):
+        self._maxsize = maxsize
+        self._data: OrderedDict[str, tuple] = OrderedDict()
+        self.hits = 0
+        self.misses = 0
+
+    def get(self, path_str: str):
+        if path_str in self._data:
+            self.hits += 1
+            self._data.move_to_end(path_str)
+            return self._data[path_str]
+        self.misses += 1
+        value = load_volume(Path(path_str))
+        self._data[path_str] = value
+        if len(self._data) > self._maxsize:
+            self._data.popitem(last=False)
+        return value
+
+
+_volume_cache = _VolumeCache(maxsize=8)
 
 
 def _root(request: Request) -> Path:
@@ -64,7 +83,7 @@ def _summary_from_cache_or_labels(case_id: str, root: Path) -> QuickCaseSummary:
 
 def _shape_context(root: Path, case_id: str) -> dict[str, Any]:
     _, label_path = get_case_paths(root, case_id)
-    label_vol, _ = _load_volume_cached(str(label_path))
+    label_vol, _ = _volume_cache.get(str(label_path))
     shape = tuple(int(v) for v in label_vol.shape)
     max_indices = {0: shape[0] - 1, 1: shape[1] - 1, 2: shape[2] - 1}
     middle_indices = {axis: max_index // 2 for axis, max_index in max_indices.items()}
@@ -91,8 +110,8 @@ def case_slice(case_id: str, request: Request, axis: int = 0, index: int = 0) ->
         raise HTTPException(status_code=400, detail="axis must be 0 (axial), 1 (coronal), or 2 (sagittal)")
     root = _root(request)
     image_path, label_path = get_case_paths(root, case_id)
-    image_vol, _ = _load_volume_cached(str(image_path))
-    label_vol, _ = _load_volume_cached(str(label_path))
+    image_vol, _ = _volume_cache.get(str(image_path))
+    label_vol, _ = _volume_cache.get(str(label_path))
     if index < 0 or index >= label_vol.shape[axis]:
         raise HTTPException(status_code=400, detail=f"index must be between 0 and {label_vol.shape[axis] - 1} for axis {axis}")
     return Response(content=render_slice_png(image_vol, label_vol, axis, index), media_type="image/png")
@@ -107,7 +126,7 @@ def metrics_panel(case_id: str, request: Request, no_cache: bool = False) -> HTM
         render3d_html = None
         if case_report.total_fragment_count > 0:
             _, label_path = get_case_paths(root, case_id)
-            label_vol, spacing = _load_volume_cached(str(label_path))
+            label_vol, spacing = _volume_cache.get(str(label_path))
             fig = build_case_figure(label_vol, spacing, mesh_smooth, fragment_meshes)
             fig.update_layout(height=700)
             # Inline plotly.js deliberately for offline local reports/panels; CDN would be smaller but network-dependent.
@@ -119,6 +138,7 @@ def metrics_panel(case_id: str, request: Request, no_cache: bool = False) -> HTM
             render3d_html=render3d_html,
             mesh_smooth_iterations=mesh_smooth,
             color_key=build_color_key(),
+            stl_base_url=f"/case/{case_id}/stl",
         ))
     except Exception as exc:
         return HTMLResponse(f'<div class="error"><strong>Unable to compute metrics:</strong> {html.escape(str(exc))}</div>')
@@ -131,3 +151,41 @@ def download_report(case_id: str, request: Request) -> FileResponse:
     case_report, fragment_meshes = get_report(case_id, root, mesh_smooth, False, include_meshes=True)
     path = write_html_report(case_report, root, _output_dir(request), mesh_smooth, fragment_meshes)
     return FileResponse(path, media_type="text/html", filename=f"{case_id}_report.html")
+
+
+@app.get("/api/cache-stats")
+def cache_stats() -> dict:
+    return {"hits": _volume_cache.hits, "misses": _volume_cache.misses, "cached_volumes": len(_volume_cache._data), "max_cached_volumes": _volume_cache._maxsize}
+
+
+def _stl_output_dir(request: Request, case_id: str) -> Path:
+    return _output_dir(request) / f"{case_id}_web_stl"
+
+
+@app.get("/case/{case_id}/stl/fragment/{label}")
+def download_fragment_stl(case_id: str, label: int, request: Request) -> FileResponse:
+    root = _root(request); mesh_smooth = _mesh_smooth(request)
+    report, meshes = get_report(case_id, root, mesh_smooth, False, include_meshes=True)
+    if meshes is None or label not in meshes:
+        report, meshes = get_report(case_id, root, mesh_smooth, True, include_meshes=True)
+    if label not in meshes:
+        raise HTTPException(status_code=404, detail="fragment mesh not found")
+    _, label_path = get_case_paths(root, case_id); _, spacing_xyz = load_volume(label_path)
+    path = _stl_output_dir(request, case_id) / f"{case_id}_fragment_{label}.stl"
+    export_fragment_stl(meshes[label], (spacing_xyz[2], spacing_xyz[1], spacing_xyz[0]), path)
+    return FileResponse(path, media_type="model/stl", filename=f"{case_id}_fragment_{label}.stl")
+
+
+@app.get("/case/{case_id}/stl/bone/{category_id}")
+def download_bone_stl(case_id: str, category_id: int, request: Request) -> FileResponse:
+    root = _root(request); mesh_smooth = _mesh_smooth(request)
+    report, meshes = get_report(case_id, root, mesh_smooth, False, include_meshes=True)
+    if meshes is None:
+        report, meshes = get_report(case_id, root, mesh_smooth, True, include_meshes=True)
+    selected = [meshes[f.label] for f in report.fragments if f.category_id == category_id and f.label in meshes]
+    if not selected:
+        raise HTTPException(status_code=404, detail="bone mesh not found")
+    _, label_path = get_case_paths(root, case_id); _, spacing_xyz = load_volume(label_path)
+    path = _stl_output_dir(request, case_id) / f"{case_id}_bone_{category_id}.stl"
+    export_bone_stl(selected, (spacing_xyz[2], spacing_xyz[1], spacing_xyz[0]), path)
+    return FileResponse(path, media_type="model/stl", filename=f"{case_id}_{CATEGORIES.get(category_id, 'bone')}_full.stl")
