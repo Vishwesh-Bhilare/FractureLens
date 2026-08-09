@@ -11,6 +11,7 @@ from scipy.ndimage import distance_transform_edt
 
 from fracturelens.core.geometry import MIN_VOXELS_FOR_MESH, FragmentMesh, build_fragment_mesh, fragment_bounding_box
 from fracturelens.core.io import CATEGORY_DISPLAY_NAMES, decode_label, get_case_paths, load_volume
+from fracturelens.core.symmetry import compute_symmetry_displacement
 
 
 @dataclass
@@ -27,6 +28,8 @@ class FragmentMetrics:
     bbox_mm: tuple[float, float, float, float, float, float]
     nearest_neighbor_dist_mm: float | None
     nearest_neighbor_label: int | None
+    # Translational-only proxy: centroid-to-mirrored-healthy-surface distance; no per-fragment rotation/correspondence.
+    symmetry_displacement_mm: float | None = None
 
 
 @dataclass
@@ -40,6 +43,7 @@ class CaseReport:
     total_fragment_count: int
     severity_score: float
     computed_at: str
+    severity_method: str = "fragment_count"
 
 
 @dataclass
@@ -62,12 +66,12 @@ def case_report_to_dict(report: CaseReport, mesh_smooth_iterations: int | None =
 
 def case_report_from_dict(data: dict[str, Any]) -> CaseReport:
     """Deserialize a ``CaseReport`` from a dictionary."""
-    fragments = [FragmentMetrics(**frag) for frag in data["fragments"]]
+    fragments = [FragmentMetrics(**{**frag, "symmetry_displacement_mm": frag.get("symmetry_displacement_mm")}) for frag in data["fragments"]]
     return CaseReport(
         case_id=data["case_id"], fragments=fragments, fractured_bones=data["fractured_bones"],
         intact_bones=data["intact_bones"], missing_bones=data["missing_bones"],
         total_fragment_count=int(data["total_fragment_count"]), severity_score=float(data["severity_score"]),
-        computed_at=data["computed_at"],
+        computed_at=data["computed_at"], severity_method=data.get("severity_method", "fragment_count"),
     )
 
 
@@ -161,6 +165,7 @@ def compute_case_report_with_meshes(case_id: str, root: Path, mesh_smooth_iterat
             if voxel_count >= MIN_VOXELS_FOR_MESH:
                 try:
                     mesh = build_fragment_mesh(mask_crop, voxel_volume_mm3, mesh_smooth_iterations)
+                    mesh.origin_zyx = (float(bbox[0].start), float(bbox[1].start), float(bbox[2].start))
                     fragment_meshes[label] = mesh
                     surface_area = _mesh_surface_area_mm2(mesh, voxel_spacing)
                 except (RuntimeError, ValueError):
@@ -179,7 +184,15 @@ def compute_case_report_with_meshes(case_id: str, root: Path, mesh_smooth_iterat
     excess = sum(max(0, count - 1) for count in counts.values() if count >= 1)
     fractured_fragments = [f for f in fragments if f.nearest_neighbor_dist_mm is not None]
     avg_gap = mean(f.nearest_neighbor_dist_mm for f in fractured_fragments) if fractured_fragments else 0.0
+    severity_method = "fragment_count"
+    symmetry = compute_symmetry_displacement(label_vol, spacing_xyz, fragment_meshes, labels_by_cat)
     # v1 illustrative formula, not a clinical severity measure -- see PROJECT_SCOPE.md §10.
     severity = excess * 10.0 + avg_gap
-    report = CaseReport(case_id, fragments, fractured, intact, missing, len(fragments), float(severity), datetime.now(timezone.utc).isoformat())
+    if symmetry is not None:
+        for frag in fragments:
+            if frag.label in symmetry:
+                frag.symmetry_displacement_mm = symmetry[frag.label]
+        severity = excess * 10.0 + mean(symmetry.values())
+        severity_method = "symmetry"
+    report = CaseReport(case_id, fragments, fractured, intact, missing, len(fragments), float(severity), datetime.now(timezone.utc).isoformat(), severity_method)
     return report, fragment_meshes

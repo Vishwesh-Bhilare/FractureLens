@@ -4,7 +4,7 @@
   <p><strong>Fractured bones:</strong> {{ report.fractured_bones|join(', ') if report.fractured_bones else 'None' }}</p>
   <p><strong>Intact bones:</strong> {{ report.intact_bones|join(', ') if report.intact_bones else 'None' }}</p>
   <p><strong>Missing bones:</strong> {{ report.missing_bones|join(', ') if report.missing_bones else 'None' }}</p>
-  <p><strong>Illustrative severity score, not a clinical measure:</strong> {{ '%.3f'|format(report.severity_score) }}</p>
+  <p><strong>Illustrative severity score (method: {{ 'symmetry-based displacement' if report.severity_method == 'symmetry' else 'fragment count' }}), not a clinical measure:</strong> {{ '%.3f'|format(report.severity_score) }}</p>
 </div>
 
 <h3>Per-bone breakdown</h3>
@@ -13,17 +13,22 @@
   <h4>{{ name }}</h4>
   <p>Fragment count: {{ fragments|length }}</p>
   <table>
-    <thead><tr><th>Fragment ID</th><th>Volume (mm³)</th><th>Surface Area (mm²)</th><th>Nearest Neighbor Distance (mm)</th></tr></thead>
+    <thead><tr><th>Fragment ID</th><th>Volume (mm³)</th><th>Surface Area (mm²)</th><th>Nearest Neighbor Distance (mm)</th><th>Symmetry Displacement (mm)</th></tr></thead>
     <tbody>
     {% for f in fragments %}
-      <tr><td>{{ f.fragment_id }}</td><td>{{ '%.3f'|format(f.volume_mm3) }}</td><td>{{ '%.3f'|format(f.surface_area_mm2) if f.surface_area_mm2 is not none else '—' }}</td><td>{{ '%.3f'|format(f.nearest_neighbor_dist_mm) if f.nearest_neighbor_dist_mm is not none else '—' }}</td></tr>
+      <tr><td>{{ f.fragment_id }}</td><td>{{ '%.3f'|format(f.volume_mm3) }}</td><td>{{ '%.3f'|format(f.surface_area_mm2) if f.surface_area_mm2 is not none else '—' }}</td><td>{{ '%.3f'|format(f.nearest_neighbor_dist_mm) if f.nearest_neighbor_dist_mm is not none else '—' }}</td><td>{{ '%.3f'|format(f.symmetry_displacement_mm) if f.symmetry_displacement_mm is not none else '—' }}</td></tr>
     {% else %}
-      <tr><td colspan="4">No labeled voxels found.</td></tr>
+      <tr><td colspan="5">No labeled voxels found.</td></tr>
     {% endfor %}
     </tbody>
   </table>
 {% endfor %}
 
+<h3>3D-printable files</h3>
+<ul>
+{% for f in report.fragments %}<li><a href="{{ stl_base_url }}/fragment/{{ f.label }}">{{ f.category_name }} fragment {{ f.fragment_id }}</a></li>{% endfor %}
+{% for cid, name in categories.items() %}{% if report.fragments|selectattr('category_id', 'equalto', cid)|list %}<li><a href="{{ stl_base_url }}/bone/{{ cid }}">{{ name }} full bone</a></li>{% endif %}{% endfor %}
+</ul>
 <h3>3D render</h3>
 {% if color_key %}
   <p class="color-key">{% for item in color_key %}<span><span class="swatch" style="background-color: {{ item.hex }}"></span>{{ item.name }}</span>{% endfor %}</p>

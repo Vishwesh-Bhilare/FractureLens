@@ -44,7 +44,7 @@ def test_metrics_panel_smoke(synthetic_root):
 def test_slice_uses_cached_volumes_on_repeat_request(synthetic_root, monkeypatch):
     import fracturelens.web.app as web_app
 
-    web_app._load_volume_cached.cache_clear()
+    web_app._volume_cache = web_app._VolumeCache(maxsize=8)
     call_count = 0
     original_load_volume = web_app.load_volume
 
@@ -65,3 +65,5 @@ def test_slice_uses_cached_volumes_on_repeat_request(synthetic_root, monkeypatch
     assert second_response.status_code == 200
     assert calls_after_first_request == 2
     assert call_count == calls_after_first_request
+    assert web_app._volume_cache.misses == 2
+    assert web_app._volume_cache.hits == 2

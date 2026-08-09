@@ -7,7 +7,8 @@
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-  <nav class="topnav"><a href="/">FractureLens</a><span>Local case viewer</span></nav>
+  <nav class="topnav"><a href="/">FractureLens</a><span>Local case viewer</span><span id="cache-stats" class="muted"></span></nav>
   <main>{% block content %}{% endblock %}</main>
+<script>fetch("/api/cache-stats").then(r=>r.json()).then(s=>{document.getElementById("cache-stats").textContent=`Volume cache: ${s.hits} hits · ${s.misses} miss${s.misses === 1 ? "" : "es"}`;}).catch(()=>{});</script>
 </body>
 </html>
